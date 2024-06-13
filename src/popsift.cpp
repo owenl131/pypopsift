@@ -1,8 +1,10 @@
 
 #include "popsift.h"
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <mutex>
+#include <pybind11/stl.h>
 
 namespace pps{
 
@@ -78,30 +80,30 @@ py::object popsift(pyarray_uint8 image,
 
         if (numFeatures >= target_num_features || peak_threshold < 0.0001){
             popsift::Feature* feature_list = result->getFeatures();
-            std::vector<float> points(4 * numFeatures);
-            std::vector<float> desc(128 * numFeatures);
-
+            int totalFeatures = 0;
+            for (size_t i = 0; i < numFeatures; i++){
+                totalFeatures += feature_list[i].num_ori;
+            }
+            std::vector<std::array<float, 4>> points(totalFeatures);
+            std::vector<std::array<float, 128>> desc(totalFeatures);
+            size_t index = 0;
             for (size_t i = 0; i < numFeatures; i++){
                 popsift::Feature pFeat = feature_list[i];
-
                 for(int oriIdx = 0; oriIdx < pFeat.num_ori; oriIdx++){
                     const popsift::Descriptor* pDesc = pFeat.desc[oriIdx];
-
-                    for (int k = 0; k < 128; k++){
-                        desc[128 * i + k] = pDesc->features[k];
-                    }
-
-                    points[4 * i + 0] = std::min<float>(std::round(pFeat.xpos), width - 1);
-                    points[4 * i + 1] = std::min<float>(std::round(pFeat.ypos), height - 1);
-                    points[4 * i + 2] = pFeat.sigma;
-                    points[4 * i + 3] = pFeat.orientation[oriIdx];
+                    std::copy(pDesc->features, pDesc->features + 128, std::begin(desc[index])); 
+                    points[index] = {
+                        std::min<float>(std::round(pFeat.xpos), width - 1),
+                        std::min<float>(std::round(pFeat.ypos), height - 1),
+                        pFeat.sigma,
+                        pFeat.orientation[oriIdx]
+                    };
+                    index++;
                 }
             }
-
-            py::list retn;
-            retn.append(py_array_from_data(&points[0], numFeatures, 4));
-            retn.append(py_array_from_data(&desc[0], numFeatures, 128));
-            return retn;
+            py::list points_list = py::cast(points);
+            py::list desc_list = py::cast(desc);
+            return py::make_tuple(points_list, desc_list);
         }else{
            // Lower peak threshold if we don't meet the target
            peak_threshold = (peak_threshold * 2.0) / 3.0;
